@@ -6,8 +6,8 @@ Pixel-perfect static mirror of [paulgeller.us](https://paulgeller.us), built fro
 
 - **Source:** Framer (published export from paulgeller.us)
 - **Hosting:** Vercel static (`public/` output)
-- **Assets:** Images, videos, and fonts mirrored locally (~60 MB)
-- **Runtime:** Framer JS bundles loaded from `framerusercontent.com` (required for interactivity)
+- **Assets:** Images, videos, fonts, and JS bundles all stored locally (~32 MB)
+- **Runtime:** Self-contained — no dependency on Framer CDN, editor bar, or analytics
 
 ## Quick start
 
