@@ -206,23 +206,19 @@ async function downloadAllJsBundles(initialHtml, urlMap) {
 }
 
 async function rewriteJsFiles(urlMap) {
-  // Stub for disabled editor bar
-  await writeFile(
-    join(JS_DIR, "noop-editor.mjs"),
-    `export function createEditorBar(){return function EditorBar(){return null}}\n`
-  );
-
   const files = await readdir(JS_DIR, { recursive: true });
   for (const rel of files) {
     if (!rel.endsWith(".mjs") && !rel.endsWith(".js")) continue;
     const path = join(JS_DIR, rel);
     let content = await readFile(path, "utf8");
 
-    content = content.replaceAll(
-      "https://framer.com/edit/init.mjs",
-      "/js/noop-editor.mjs"
-    );
-    content = content.replace(/EditorBar:[^,]+,/, "EditorBar:void 0,");
+    // Remove on-page editor bar (loads framer.com/edit) without breaking syntax
+    if (rel === "script_main.CTyv5ell.mjs" || rel.endsWith("/script_main.CTyv5ell.mjs")) {
+      content = content.replace(
+        /EditorBar:a===void 0\?void 0:\(\(\)=>[\s\S]*?\}\)\(\),adaptLayoutToTextDirection/,
+        "EditorBar:void 0,adaptLayoutToTextDirection"
+      );
+    }
 
     content = rewriteUrls(content, urlMap);
     await writeFile(path, content);
