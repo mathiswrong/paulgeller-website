@@ -44,14 +44,16 @@ async function fetchBuffer(url) {
 function extractUrls(html) {
   const urls = new Set();
   const patterns = [
-    /https:\/\/framerusercontent\.com\/[a-zA-Z0-9_./?&=%-]+/g,
-    /https:\/\/fonts\.gstatic\.com\/[a-zA-Z0-9_./?&=%-]+/g,
+    /https:\/\/framerusercontent\.com\/[^"'\s)>]+/g,
+    /https:\/\/fonts\.gstatic\.com\/[^"'\s)>]+/g,
   ];
   for (const re of patterns) {
     for (const m of html.matchAll(re)) {
       let url = m[0].replace(/&amp;/g, "&");
-      // Strip trailing punctuation from regex overshoot
       url = url.replace(/[)"'\\]+$/, "");
+      // Normalize to base path (drop Framer resize query params)
+      const q = url.indexOf("?");
+      if (q !== -1) url = url.slice(0, q);
       urls.add(url);
     }
   }
@@ -103,14 +105,14 @@ async function pool(items, fn, limit) {
 
 function rewriteHtml(html, urlMap) {
   let out = html;
-  // Sort longest-first to avoid partial replacements
   const entries = [...urlMap.entries()].sort((a, b) => b[0].length - a[0].length);
   for (const [remote, local] of entries) {
     const localUrl = `/${local}`;
-    out = out.split(remote).join(localUrl);
-    out = out.split(remote.replace(/&/g, "&amp;")).join(localUrl);
+    const escaped = remote.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Replace base URL plus optional Framer CDN query params (?width=…&height=…)
+    const re = new RegExp(escaped + "(?:\\?[^\"'\\s)>]*)?", "g");
+    out = out.replace(re, localUrl);
   }
-  // Normalize canonical/og URLs to relative deployment
   out = out.replace(/https:\/\/paulgeller\.us\//g, "/");
   return out;
 }
