@@ -199,8 +199,8 @@ function stripFramerServices(html) {
   out = out.replace(/\s*<meta name="framer-search-index[^>]*>/g, "");
   out = out.replace(/\s*<meta name="framer-html-plugin"[^>]*>/g, "");
 
-  // Framer generator comment is fine to keep or remove
   out = out.replace(/<!-- Made in Framer[^>]*-->\s*/g, "");
+  out = out.replace(/\s*<meta name="generator" content="Framer[^"]*">\s*/g, "\n");
 
   // Point JS bundles to local /js/
   out = out.replace(
