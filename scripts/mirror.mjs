@@ -15,6 +15,7 @@ const ROOT = join(__dirname, "..");
 const PUBLIC = join(ROOT, "public");
 const ASSETS = join(PUBLIC, "assets");
 const JS_DIR = join(PUBLIC, "js");
+const MODULES_DIR = join(PUBLIC, "modules");
 
 const ORIGIN = "https://paulgeller.us";
 const FRAMER_SITE = "https://framerusercontent.com/sites/4jYyIqRzhS5kgptQHFTjbP";
@@ -86,11 +87,16 @@ function jsLocalPath(filename) {
   return `js/${basename(filename)}`;
 }
 
-function moduleLocalPath(url) {
-  const u = new URL(url);
-  const hash = createHash("sha256").update(url).digest("hex").slice(0, 10);
-  const name = u.pathname.split("/").pop() || "module";
-  return `js/modules/${name.replace(/\.[^.]+$/, "")}-${hash}${extname(name) || ".js"}`;
+function modulePublicPath(url) {
+  const { pathname } = new URL(url);
+  return pathname.replace(/^\//, "");
+}
+
+function rewriteModuleBases(content) {
+  return content.replace(
+    /`https:\/\/framerusercontent\.com(\/modules\/[^`]+)`/g,
+    "location.origin+`$1`"
+  );
 }
 
 async function downloadTo(url, destRel) {
@@ -119,13 +125,56 @@ async function pool(items, fn, limit) {
   );
 }
 
-function rewriteUrls(text, urlMap) {
+async function downloadFramerModules(texts) {
+  const combined = texts.join("\n");
+  const moduleFiles = new Set();
+
+  for (const m of combined.matchAll(/https:\/\/framerusercontent\.com(\/modules\/[^"'\s`)>]+)/g)) {
+    moduleFiles.add(m[1]);
+  }
+
+  // Discover sibling files (.framercms, -0.js, etc.) from each module entrypoint
+  for (const rel of [...moduleFiles].filter((p) => p.endsWith(".js"))) {
+    const dir = rel.slice(0, rel.lastIndexOf("/") + 1);
+    for (const m of combined.matchAll(/\.\/([^`"'\\s]+\.framercms)/g)) {
+      moduleFiles.add(`${dir}${m[1]}`);
+    }
+    try {
+      const content = await fetchText(`https://framerusercontent.com${rel}`);
+      for (const m of content.matchAll(/from"\.\/([^"]+)"/g)) {
+        moduleFiles.add(`${dir}${m[1]}`);
+      }
+    } catch {
+      /* optional */
+    }
+  }
+
+  for (const rel of moduleFiles) {
+    const url = `https://framerusercontent.com${rel}`;
+    await downloadTo(url, modulePublicPath(url));
+  }
+
+  console.log(`  Downloaded ${moduleFiles.size} Framer module files`);
+}
+
+function rewriteUrlsExact(text, urlMap) {
+  let out = text;
+  const entries = [...urlMap.entries()].sort((a, b) => b[0].length - a[0].length);
+  for (const [remote, local] of entries) {
+    const localUrl = local.startsWith("/") ? local : `/${local}`;
+    out = out.replaceAll(remote, localUrl);
+  }
+  return out;
+}
+
+function rewriteHtmlUrls(text, urlMap) {
   let out = text;
   const entries = [...urlMap.entries()].sort((a, b) => b[0].length - a[0].length);
   for (const [remote, local] of entries) {
     const localUrl = local.startsWith("/") ? local : `/${local}`;
     const escaped = remote.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(escaped + "(?:\\?[^\"'\\s)>]*)?", "g");
+    // HTML may include Framer resize params; stop before comma or quote
+    const re = new RegExp(escaped + "(?:\\?[^\"'\\s,)>]*)?", "g");
     out = out.replace(re, localUrl);
   }
   return out;
@@ -190,15 +239,6 @@ async function downloadAllJsBundles(initialHtml, urlMap) {
     for (const imp of extractJsImports(content)) {
       if (!seen.has(imp)) queue.push(imp);
     }
-
-    // Download module URLs referenced in JS
-    for (const modUrl of extractUrlsFromText(content)) {
-      if (modUrl.includes("/modules/") && modUrl.endsWith(".js")) {
-        const localMod = moduleLocalPath(modUrl);
-        await downloadTo(modUrl, localMod);
-        urlMap.set(modUrl, localMod);
-      }
-    }
   }
 
   console.log(`  Downloaded ${seen.size} JS bundles`);
@@ -206,13 +246,14 @@ async function downloadAllJsBundles(initialHtml, urlMap) {
 }
 
 async function rewriteJsFiles(urlMap) {
+  const { execSync } = await import("node:child_process");
   const files = await readdir(JS_DIR, { recursive: true });
+
   for (const rel of files) {
     if (!rel.endsWith(".mjs") && !rel.endsWith(".js")) continue;
     const path = join(JS_DIR, rel);
     let content = await readFile(path, "utf8");
 
-    // Remove on-page editor bar (loads framer.com/edit) without breaking syntax
     if (rel === "script_main.CTyv5ell.mjs" || rel.endsWith("/script_main.CTyv5ell.mjs")) {
       content = content.replace(
         /EditorBar:a===void 0\?void 0:\(\(\)=>[\s\S]*?\}\)\(\),adaptLayoutToTextDirection/,
@@ -220,8 +261,15 @@ async function rewriteJsFiles(urlMap) {
       );
     }
 
-    content = rewriteUrls(content, urlMap);
+    content = rewriteModuleBases(content);
+    content = rewriteUrlsExact(content, urlMap);
     await writeFile(path, content);
+
+    try {
+      execSync(`node --check "${path}"`, { stdio: "pipe" });
+    } catch {
+      throw new Error(`Syntax error after rewrite: ${rel}`);
+    }
   }
 }
 
@@ -230,6 +278,7 @@ async function main() {
   await mkdir(PUBLIC, { recursive: true });
   await mkdir(ASSETS, { recursive: true });
   await mkdir(JS_DIR, { recursive: true });
+  await mkdir(MODULES_DIR, { recursive: true });
 
   const rawPages = new Map();
   const allHtml = [];
@@ -259,7 +308,8 @@ async function main() {
 
   // Skip JS bundles already handled, skip framer.com, skip invalid URLs
   const downloadable = [...assetUrls].filter((u) => {
-    if (u.includes("framer.com") || u.includes("/sites/") || u.endsWith(".mjs")) return false;
+    if (u.includes("framer.com") || u.includes("/sites/") || u.includes("/modules/") || u.endsWith(".mjs"))
+      return false;
     if (!u.includes("framerusercontent.com") && !u.includes("fonts.gstatic.com")) return false;
     const path = new URL(u).pathname;
     const ext = extname(path);
@@ -283,6 +333,15 @@ async function main() {
   );
   console.log("\n");
 
+  // 2b. Download Framer CMS modules (preserve directory structure)
+  console.log("  Downloading Framer CMS modules …");
+  const jsTexts = [];
+  for (const file of await readdir(JS_DIR, { recursive: true })) {
+    if (!file.endsWith(".mjs") && !file.endsWith(".js")) continue;
+    jsTexts.push(await readFile(join(JS_DIR, file), "utf8"));
+  }
+  await downloadFramerModules([combined, ...jsTexts]);
+
   // 3. Rewrite JS files with local asset paths
   console.log("  Rewriting JS bundles to use local assets …");
   await rewriteJsFiles(urlMap);
@@ -290,7 +349,7 @@ async function main() {
   // 4. Write HTML pages
   for (const page of PAGES) {
     let html = rawPages.get(page.out);
-    html = rewriteUrls(html, urlMap);
+    html = rewriteHtmlUrls(html, urlMap);
     html = stripFramerServices(html);
     await writeFile(join(PUBLIC, page.out), html);
     console.log(`  Wrote public/${page.out}`);
