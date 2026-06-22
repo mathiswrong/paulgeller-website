@@ -50,7 +50,7 @@ The site uses `mailto:` links (not a form POST). Links open the user's email cli
 
 ## Re-syncing
 
-When the live Framer site is updated, run `npm run mirror` and redeploy. The script fetches fresh HTML and re-downloads changed assets.
+`npm run mirror` fetches a fresh copy from the live Framer site. Run this **before** closing your Framer account if you need to pull updates. Vercel deploys the committed `public/` folder directly — no network fetch at build time.
 
 ## License
 
