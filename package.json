@@ -1,0 +1,15 @@
+{
+  "name": "paulgeller-website",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pixel-perfect mirror of paulgeller.us — static export for Vercel",
+  "scripts": {
+    "mirror": "node scripts/mirror.mjs",
+    "build": "node scripts/mirror.mjs",
+    "dev": "npx serve public -p 3000",
+    "preview": "npx serve public -p 3000"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
