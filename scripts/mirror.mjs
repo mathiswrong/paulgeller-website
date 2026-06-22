@@ -19,6 +19,7 @@ const MODULES_DIR = join(PUBLIC, "modules");
 
 const ORIGIN = "https://paulgeller.us";
 const FRAMER_SITE = "https://framerusercontent.com/sites/4jYyIqRzhS5kgptQHFTjbP";
+const GA_MEASUREMENT_ID = "G-RSFZJFXPPC";
 const PAGES = [
   { path: "/", out: "index.html" },
   { path: "/404", out: "404.html" },
@@ -178,6 +179,26 @@ function rewriteHtmlUrls(text, urlMap) {
     out = out.replace(re, localUrl);
   }
   return out;
+}
+
+function googleAnalyticsSnippet() {
+  return `<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', '${GA_MEASUREMENT_ID}');
+</script>`;
+}
+
+function injectGoogleAnalytics(html) {
+  if (html.includes(GA_MEASUREMENT_ID)) return html;
+  const snippet = googleAnalyticsSnippet();
+  return html.replace(
+    /(<!-- Start of headStart -->)\s*[\s\S]*?(<!-- End of headStart -->)/,
+    `$1\n${snippet}\n    $2`
+  );
 }
 
 function stripFramerServices(html) {
@@ -351,6 +372,7 @@ async function main() {
     let html = rawPages.get(page.out);
     html = rewriteHtmlUrls(html, urlMap);
     html = stripFramerServices(html);
+    html = injectGoogleAnalytics(html);
     await writeFile(join(PUBLIC, page.out), html);
     console.log(`  Wrote public/${page.out}`);
   }
